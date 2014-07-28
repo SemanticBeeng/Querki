@@ -279,16 +279,63 @@ trait LinkUtils { self:CoreEcot =>
     filteredAsModel.filterNot(_.ifSet(InternalProp))
   }    
   
-    def renderInputXmlGuts(prop:Property[_,_], context:QLContext, currentValue:DisplayPropVal, v:ElemValue, allowEmpty:Boolean):NodeSeq = {
-      <select class="_linkSelect"> 
-      {
+  def renderInputXmlGuts(prop:Property[_,_], context:QLContext, currentValue:DisplayPropVal, v:ElemValue, allowEmpty:Boolean):NodeSeq = {
+    val Links = interface[querki.links.Links]
+    val state = context.state
+    val linkModel = prop.getPropOpt(Links.LinkModelProp)(state)
+    linkModel match {
+      case Some(propAndVal) if (!propAndVal.isEmpty) => {
+        val model = state.anything(propAndVal.first).get
+        if (model.ifSet(Links.NoCreateThroughLinkProp)(state))
+          renderInputXmlAsRadio(prop, context, currentValue, v, allowEmpty)
+        else
+          renderInputXmlAsSelect(prop, context, currentValue, v, allowEmpty, Some(model))
+      }
+      case _ => renderInputXmlAsSelect(prop, context, currentValue, v, allowEmpty, None)
+    }
+  }
+  
+  def linkCandidates(prop:Property[_,_], state:SpaceState, currentValue:DisplayPropVal, Links:querki.links.Links):Seq[Thing] = {
+    prop match {
+      case f:LinkCandidateProvider => f.getLinkCandidates(state, currentValue)
+      case _ => linkCandidates(state, Links, prop).toSeq.sortBy(_.displayName)
+    }
+  }
+  
+  def renderInputXmlAsRadio(prop:Property[_,_], context:QLContext, currentValue:DisplayPropVal, v:ElemValue, allowEmpty:Boolean):NodeSeq = {
+    val state = context.state
+    val Links = interface[querki.links.Links]
+    // Give the Property a chance to chime in on which candidates belong here:
+    val candidates = linkCandidates(prop, state, currentValue, Links)
+    <div class="_linkRadio"> {
+      val realOptions =
+        if (candidates.isEmpty) {
+          <p><i>None defined</i></p>
+        } else {
+          candidates map { candidate =>
+            if (candidate.id == v.elem) {
+              <label class="radio"><input type="radio" value={candidate.id.toString} name={currentValue.inputControlId} checked="checked"></input>{candidate.unsafeDisplayName}</label>
+            } else {
+              <label class="radio"><input type="radio" value={candidate.id.toString} name={currentValue.inputControlId}></input>{candidate.unsafeDisplayName}</label>
+            }
+          }
+        }
+      val withOpt =
+        if (allowEmpty)
+          <label class="radio"><input type="radio" value={UnknownOID.id.toString} name={currentValue.inputControlId}></input>Nothing selected</label> +: realOptions
+        else
+          realOptions
+      withOpt
+    } </div>
+  }
+  
+  def renderInputXmlAsSelect(prop:Property[_,_], context:QLContext, currentValue:DisplayPropVal, v:ElemValue, allowEmpty:Boolean, modelOpt:Option[Thing]):NodeSeq = {
+    <select class="_linkSelect"> 
+    {
       val state = context.state
       val Links = interface[querki.links.Links]
       // Give the Property a chance to chime in on which candidates belong here:
-      val candidates = prop match {
-        case f:LinkCandidateProvider => f.getLinkCandidates(state, currentValue)
-        case _ => linkCandidates(state, Links, prop).toSeq.sortBy(_.displayName)
-      }
+      val candidates = linkCandidates(prop, state, currentValue, Links)
       val realOptions =
         if (candidates.isEmpty) {
           Seq(<option value={UnknownOID.toString}><i>None defined</i></option>)
@@ -308,20 +355,14 @@ trait LinkUtils { self:CoreEcot =>
           <option value={UnknownOID.id.toString}>Nothing selected</option> +: realOptions
         else
           realOptions
-      val linkModel = prop.getPropOpt(Links.LinkModelProp)(state)
-      linkModel match {
-        case Some(propAndVal) if (!propAndVal.isEmpty) => {
-          val model = state.anything(propAndVal.first).get
-          if (model.ifSet(Links.NoCreateThroughLinkProp)(state))
-            withOpt
-          else
-            withOpt :+ <option class="_createNewFromModel" data-model={model.toThingId} value={UnknownOID.id.toString}>Create a New {model.displayName}</option>
+      modelOpt match {
+        case Some(model) => {
+          withOpt :+ <option class="_createNewFromModel" data-model={model.toThingId} value={UnknownOID.id.toString}>Create a New {model.displayName}</option>
         }
-        case _ => withOpt
+        case None => withOpt
       }
-      } </select>
-    }
-  
+    } </select>
+  }  
 }
 
 trait CoreExtra {
